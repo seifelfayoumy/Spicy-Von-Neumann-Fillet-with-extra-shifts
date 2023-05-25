@@ -4,25 +4,31 @@ import java.io.IOException;
 
 public class CPU {
     String[] memory;
+    String[] registers;
 
     public CPU() {
         this.memory = new String[2048];
         this.emptyDataMemory();
         int programSize = this.parseFile();
         int clockCycles = 7 + ((programSize - 1) * 2);
-
+        int fetching =1;
 
         for (int i = 1; i <= clockCycles; i++) {
             if (1 % 2 != 0) {
                 String instruction = this.fetch();
                 System.out.println("clock: " + i);
                 System.out.println(instruction);
+                fetching +=1;
             }
+
             //decode
             //execute
             //memory
             //writeback
         }
+
+
+
 
     }
 
@@ -35,6 +41,88 @@ public class CPU {
 
         return instruction;
     }
+
+    public Instruction decode(String instruction){
+        String opcode = instruction.substring(0, 4);
+        Instruction decoded = new Instruction();
+
+        switch(opcode){
+            case "0000":{
+                decoded.opcode = 0;
+                decoded.type = INSTRUCTION_TYPE.R;
+                break;
+            }
+            case "0001":{
+                decoded.opcode = 1;
+                decoded.type = INSTRUCTION_TYPE.R;
+                break;
+            }
+            case "0010":{
+                decoded.opcode = 2;
+                decoded.type = INSTRUCTION_TYPE.I;
+                break;
+            }
+            case "0011":{
+                decoded.opcode = 3;
+                decoded.type = INSTRUCTION_TYPE.I;
+                break;
+            }
+            case "0100":{
+                decoded.opcode = 4;
+                decoded.type = INSTRUCTION_TYPE.I;
+                break;
+            }
+            case "0101":{
+                decoded.opcode = 5;
+                decoded.type = INSTRUCTION_TYPE.I;
+                break;
+            }
+            case "0110":{
+                decoded.opcode = 6;
+                decoded.type = INSTRUCTION_TYPE.I;
+                break;
+            }
+            case "0111":{
+                decoded.opcode = 7;
+                decoded.type = INSTRUCTION_TYPE.J;
+                break;
+            }
+            case "1000":{
+                decoded.opcode = 8;
+                decoded.type = INSTRUCTION_TYPE.R;
+                break;
+            }
+            case "1001":{
+                decoded.opcode = 9;
+                decoded.type = INSTRUCTION_TYPE.R;
+                break;
+            }
+            case "1010":{
+                decoded.opcode = 10;
+                decoded.type = INSTRUCTION_TYPE.I;
+                break;
+            }
+            case "1011":{
+                decoded.opcode = 11;
+                decoded.type = INSTRUCTION_TYPE.I;
+                break;
+            }
+        }
+        if(decoded.type.equals(INSTRUCTION_TYPE.R)){
+            decoded.R1 = CPU.binaryToInt(instruction.substring(4,9));
+            decoded.R2 = CPU.binaryToInt(instruction.substring(9,14));
+            decoded.R3 = CPU.binaryToInt(instruction.substring(14,19));
+            decoded.SHAMT = CPU.binaryToInt(instruction.substring(19,32));
+        } else if(decoded.type.equals(INSTRUCTION_TYPE.I)){
+            decoded.R1 = CPU.binaryToInt(instruction.substring(4,9));
+            decoded.R2 = CPU.binaryToInt(instruction.substring(9,14));
+            decoded.IMMEDIATE = CPU.binaryToInt(instruction.substring(14,32));
+        } else if(decoded.type.equals(INSTRUCTION_TYPE.J)){
+            decoded.Address = CPU.binaryToInt(instruction.substring(4,32));
+        }
+        return decoded;
+    }
+
 
     public int parseFile() {
         try (BufferedReader reader = new BufferedReader(new FileReader("src/program.txt"))) {
