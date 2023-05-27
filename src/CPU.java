@@ -1,126 +1,258 @@
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.Queue;
 
 public class CPU {
     String[] memory;
-    String[] registers;
+    int[] registers;
 
     public CPU() {
         this.memory = new String[2048];
-        this.emptyDataMemory();
         int programSize = this.parseFile();
         int clockCycles = 7 + ((programSize - 1) * 2);
-        int fetching =1;
+        this.registers = new int[33];
+        Arrays.fill(registers, 0);
+        Queue<Instruction> pipeline = new LinkedList<>();
 
         for (int i = 1; i <= clockCycles; i++) {
-            if (1 % 2 != 0) {
-                String instruction = this.fetch();
-                System.out.println("clock: " + i);
-                System.out.println(instruction);
-                fetching +=1;
+            System.out.println("Clock: " + i);
+
+            if (i % 2 != 0) {
+                Instruction newInstruction = fetch();
+                if (newInstruction != null) {
+                    pipeline.add(newInstruction);
+                }
             }
 
-            //decode
-            //execute
-            //memory
-            //writeback
+            Iterator<Instruction> iterator = pipeline.iterator();
+            while (iterator.hasNext()) {
+                Instruction instruction = iterator.next();
+                System.out.print("Instruction " + instruction.id + ", Pipeline Stage: ");
+                switch (instruction.pipelineStage) {
+                    case 1:
+                        System.out.println("fetching (input: PC " + (this.registers[32]-1) + ", output: " + instruction.binary + ")");
+                        break;
+                    case 2:
+                        instruction = decode(instruction);
+                        System.out.println("decoding (input: " + instruction.binary + ", output: " + instruction + ")");
+                        break;
+                    case 3:
+                        System.out.println("decoding (input: " + instruction.binary + ", output: " + instruction + ")");
+                        break;
+                    case 4:
+                        execute(instruction);
+                        System.out.println("executing (input: " + instruction + ", output: " + instruction.executed + ")");
+                        break;
+                    case 5:
+                        System.out.println("executing (input: " + instruction + ", output: " + instruction.executed + ")");
+                        break;
+                    case 6:
+                        memoryOperation(instruction);
+                        System.out.println("memory (input: " + instruction + ", output: write/read to memory if any)");
+                        break;
+                    case 7:
+                        writebackOperation(instruction);
+                        System.out.println("writeback (input: " + instruction + ", output write to destination register if any)");
+                        iterator.remove();
+                        break;
+                }
+                instruction.pipelineStage++;
+            }
+
+            if (i == clockCycles) {
+                this.printAllRegisters();
+                this.printMemory();
+            }
+
         }
-
-
-
-
     }
 
-    public String fetch() {
-        int pc = CPU.binaryToInt(this.memory[1056]);
+    public void printMemory() {
+        for (int i = 0; i < this.memory.length; i++) {
+            String memoryWord = this.memory[i];
+            if (this.memory[i] == null) {
+                memoryWord = "EMPTY";
+            }
+            System.out.println("Memory index " + i + ": " + memoryWord);
+        }
+    }
+
+    public void printAllRegisters() {
+        for (int i = 0; i < this.registers.length; i++) {
+            if (i == 32) {
+                System.out.println("Register PC" + ": " + this.registers[i]);
+            } else {
+                System.out.println("Register R" + i + ": " + this.registers[i]);
+            }
+
+        }
+    }
+
+    public void memoryOperation(Instruction instruction) {
+        if (instruction.executed.storeMemoryAddress != -1) {
+            this.memory[instruction.executed.storeMemoryAddress] = CPU.extendBitsSigned(CPU.getBinaryTwosCompliment(instruction.executed.data), 32);
+            System.out.println("Change in data memory: At " + instruction.executed.storeMemoryAddress + " <- " + instruction.executed.data);
+        }
+        if (instruction.executed.loadMemoryAddress != -1) {
+            instruction.executed.data = CPU.parseSignedBinary(this.memory[instruction.executed.loadMemoryAddress]);
+        }
+    }
+
+    public void writebackOperation(Instruction instruction) {
+        if (instruction.executed.destinationRegister != -1 && instruction.executed.destinationRegister != 0) {
+            this.registers[instruction.executed.destinationRegister] = instruction.executed.data;
+            System.out.println("Change in register: R" + instruction.executed.destinationRegister + " <- " + instruction.executed.data);
+        }
+    }
+
+    public void execute(Instruction instruction) {
+        ExecutedInstruction result = new ExecutedInstruction();
+        switch (instruction.opcode) {
+            case 0: // ADD
+                result.data = this.registers[instruction.R2] + this.registers[instruction.R3];
+                result.destinationRegister = instruction.R1;
+                break;
+            case 1: // SUB
+                result.data = this.registers[instruction.R2] - this.registers[instruction.R3];
+                result.destinationRegister = instruction.R1;
+                break;
+            case 2: // MULI
+                result.data = this.registers[instruction.R2] * instruction.IMM;
+                result.destinationRegister = instruction.R1;
+                break;
+            case 3: // ADDI
+                result.data = this.registers[instruction.R2] + instruction.IMM;
+                result.destinationRegister = instruction.R1;
+                break;
+            case 4: // BNE
+                if (this.registers[instruction.R1] != this.registers[instruction.R2]) {
+                    this.registers[32] += instruction.IMM;
+                }
+                break;
+            case 5: // ANDI
+                result.data = this.registers[instruction.R2] & instruction.IMM;
+                result.destinationRegister = instruction.R1;
+                break;
+            case 6: // ORI
+                result.data = this.registers[instruction.R2] | instruction.IMM;
+                result.destinationRegister = instruction.R1;
+                break;
+            case 7: // J
+                this.registers[32] = (this.registers[32] & 0xF0000000) | instruction.ADDRESS;
+                break;
+            case 8: // SLL
+                result.data = this.registers[instruction.R2] << instruction.SHAMT;
+                result.destinationRegister = instruction.R1;
+                break;
+            case 9: // SRL
+                result.data = this.registers[instruction.R2] >>> instruction.SHAMT;
+                result.destinationRegister = instruction.R1;
+                break;
+            case 10: // LW
+                result.loadMemoryAddress = this.registers[instruction.R2] + instruction.IMM;
+                result.destinationRegister = instruction.R1;
+                break;
+            case 11: // SW
+                result.storeMemoryAddress = this.registers[instruction.R2] + instruction.IMM;
+                result.data = this.registers[instruction.R1];
+                break;
+        }
+        instruction.executed = result;
+    }
+
+
+    public Instruction fetch() {
+        int pc = this.registers[32];
         String instruction = this.memory[pc];
-        pc += 1;
-        String newPC = CPU.getBits(pc, 32);
-        this.memory[1056] = newPC;
-
-        return instruction;
+        if (instruction == null || instruction == "") {
+            return null;
+        }
+        this.registers[32] = pc + 1;
+        return new Instruction(instruction);
     }
 
-    public Instruction decode(String instruction){
-        String opcode = instruction.substring(0, 4);
-        Instruction decoded = new Instruction();
+    public Instruction decode(Instruction instruction) {
+        String opcode = instruction.binary.substring(0, 4);
 
-        switch(opcode){
-            case "0000":{
-                decoded.opcode = 0;
-                decoded.type = INSTRUCTION_TYPE.R;
+        switch (opcode) {
+            case "0000": {
+                instruction.opcode = 0;
+                instruction.type = INSTRUCTION_TYPE.R;
                 break;
             }
-            case "0001":{
-                decoded.opcode = 1;
-                decoded.type = INSTRUCTION_TYPE.R;
+            case "0001": {
+                instruction.opcode = 1;
+                instruction.type = INSTRUCTION_TYPE.R;
                 break;
             }
-            case "0010":{
-                decoded.opcode = 2;
-                decoded.type = INSTRUCTION_TYPE.I;
+            case "0010": {
+                instruction.opcode = 2;
+                instruction.type = INSTRUCTION_TYPE.I;
                 break;
             }
-            case "0011":{
-                decoded.opcode = 3;
-                decoded.type = INSTRUCTION_TYPE.I;
+            case "0011": {
+                instruction.opcode = 3;
+                instruction.type = INSTRUCTION_TYPE.I;
                 break;
             }
-            case "0100":{
-                decoded.opcode = 4;
-                decoded.type = INSTRUCTION_TYPE.I;
+            case "0100": {
+                instruction.opcode = 4;
+                instruction.type = INSTRUCTION_TYPE.I;
                 break;
             }
-            case "0101":{
-                decoded.opcode = 5;
-                decoded.type = INSTRUCTION_TYPE.I;
+            case "0101": {
+                instruction.opcode = 5;
+                instruction.type = INSTRUCTION_TYPE.I;
                 break;
             }
-            case "0110":{
-                decoded.opcode = 6;
-                decoded.type = INSTRUCTION_TYPE.I;
+            case "0110": {
+                instruction.opcode = 6;
+                instruction.type = INSTRUCTION_TYPE.I;
                 break;
             }
-            case "0111":{
-                decoded.opcode = 7;
-                decoded.type = INSTRUCTION_TYPE.J;
+            case "0111": {
+                instruction.opcode = 7;
+                instruction.type = INSTRUCTION_TYPE.J;
                 break;
             }
-            case "1000":{
-                decoded.opcode = 8;
-                decoded.type = INSTRUCTION_TYPE.R;
+            case "1000": {
+                instruction.opcode = 8;
+                instruction.type = INSTRUCTION_TYPE.R;
                 break;
             }
-            case "1001":{
-                decoded.opcode = 9;
-                decoded.type = INSTRUCTION_TYPE.R;
+            case "1001": {
+                instruction.opcode = 9;
+                instruction.type = INSTRUCTION_TYPE.R;
                 break;
             }
-            case "1010":{
-                decoded.opcode = 10;
-                decoded.type = INSTRUCTION_TYPE.I;
+            case "1010": {
+                instruction.opcode = 10;
+                instruction.type = INSTRUCTION_TYPE.I;
                 break;
             }
-            case "1011":{
-                decoded.opcode = 11;
-                decoded.type = INSTRUCTION_TYPE.I;
+            case "1011": {
+                instruction.opcode = 11;
+                instruction.type = INSTRUCTION_TYPE.I;
                 break;
             }
         }
-        if(decoded.type.equals(INSTRUCTION_TYPE.R)){
-            decoded.R1 = CPU.binaryToInt(instruction.substring(4,9));
-            decoded.R2 = CPU.binaryToInt(instruction.substring(9,14));
-            decoded.R3 = CPU.binaryToInt(instruction.substring(14,19));
-            decoded.SHAMT = CPU.binaryToInt(instruction.substring(19,32));
-        } else if(decoded.type.equals(INSTRUCTION_TYPE.I)){
-            decoded.R1 = CPU.binaryToInt(instruction.substring(4,9));
-            decoded.R2 = CPU.binaryToInt(instruction.substring(9,14));
-            decoded.IMMEDIATE = CPU.binaryToInt(instruction.substring(14,32));
-        } else if(decoded.type.equals(INSTRUCTION_TYPE.J)){
-            decoded.Address = CPU.binaryToInt(instruction.substring(4,32));
+        if (instruction.type.equals(INSTRUCTION_TYPE.R)) {
+            instruction.R1 = CPU.parseSignedBinary(instruction.binary.substring(4, 9));
+            instruction.R2 = CPU.parseSignedBinary(instruction.binary.substring(9, 14));
+            instruction.R3 = CPU.parseSignedBinary(instruction.binary.substring(14, 19));
+            instruction.SHAMT = CPU.parseSignedBinary(instruction.binary.substring(19, 32));
+        } else if (instruction.type.equals(INSTRUCTION_TYPE.I)) {
+            instruction.R1 = CPU.parseSignedBinary(instruction.binary.substring(4, 9));
+            instruction.R2 = CPU.parseSignedBinary(instruction.binary.substring(9, 14));
+            instruction.IMM = CPU.parseSignedBinary(instruction.binary.substring(14, 32));
+        } else if (instruction.type.equals(INSTRUCTION_TYPE.J)) {
+            instruction.ADDRESS = Integer.parseInt(instruction.binary.substring(4, 32), 2);
         }
-        return decoded;
+        return instruction;
     }
 
 
@@ -165,7 +297,7 @@ public class CPU {
                         instruction += "0111";
                         type = "J";
                         break;
-                    case "SFL":
+                    case "SLL":
                         instruction += "1000";
                         type = "R";
                         break;
@@ -184,14 +316,14 @@ public class CPU {
                 }
 
                 if (type.equals("J")) {
-                    instruction += CPU.extendBits(Integer.parseInt(words[1]), 18);
+                    instruction += CPU.extendBits0(Integer.toBinaryString(Integer.parseInt(words[1])), 28);
                 } else if (type.equals("R")) {
                     instruction += CPU.getBinaryForRegister(words[1]);
                     instruction += CPU.getBinaryForRegister(words[2]);
 
-                    if (words[0].equals("SLL") || words[0].equals("SLL")) {
+                    if (words[0].equals("SLL") || words[0].equals("SRL")) {
                         instruction += "00000";
-                        instruction += CPU.extendBits(Integer.parseInt(words[3]), 13);
+                        instruction += CPU.extendBits0(Integer.toBinaryString(Integer.parseInt(words[3])), 13);
                     } else {
                         instruction += CPU.getBinaryForRegister(words[3]);
                         instruction += "0000000000000";
@@ -199,31 +331,16 @@ public class CPU {
                 } else if (type.equals("I")) {
                     instruction += CPU.getBinaryForRegister(words[1]);
                     instruction += CPU.getBinaryForRegister(words[2]);
-                    instruction += CPU.extendBits(Integer.parseInt(words[3]), 18);
+                    instruction += CPU.extendBitsSigned(CPU.getBinaryTwosCompliment(Integer.parseInt(words[3])), 18);
                 }
-
                 this.memory[memoryIndex] = instruction;
                 memoryIndex += 1;
             }
-            return memoryIndex + 1;
+            return memoryIndex;
         } catch (IOException e) {
             e.printStackTrace();
             return -1;
         }
-    }
-
-    public void printMemory() {
-        for (int i = 0; i < this.memory.length; i++) {
-            System.out.println(memory[i]);
-        }
-    }
-
-    private static String extendBits(int number, int numBits) {
-        int signBit = number & (1 << (numBits - 1));
-        int mask = (1 << numBits) - 1;
-        int extendedNumber = signBit != 0 ? (number | ~mask) : (number & mask);
-        String binaryString = Integer.toBinaryString(extendedNumber);
-        return String.format("%" + numBits + "s", binaryString).replace(' ', '0');
     }
 
     private static String getBinaryForRegister(String reg) {
@@ -297,37 +414,57 @@ public class CPU {
         }
     }
 
-    private static int binaryToInt(String binary) {
-        if (binary.length() != 32) {
-            throw new IllegalArgumentException("Invalid binary string length. Expected 32 bits.");
-        }
-
-        int result = 0;
-        for (int i = 0; i < binary.length(); i++) {
-            char c = binary.charAt(i);
-            if (c == '1') {
-                result = result | (1 << (31 - i));
-            } else if (c != '0') {
-                throw new IllegalArgumentException("Invalid binary string. Only '0' and '1' are allowed.");
+    public static String extendBits0(String binary, int num) {
+        if (binary.length() < num) {
+            int y = binary.length();
+            for (int i = 0; i < num - y; i++) {
+                binary = "0" + binary;
             }
         }
-        return result;
+        return binary;
     }
 
-    public void emptyDataMemory() {
-        for (int i = 1024; i <= 1057; i++) {
-            this.memory[i] = CPU.extendBits(0, 32);
+    public static String extendBitsSigned(String binary, int num) {
+        String bit;
+
+        if (binary.charAt(0) == '0') {
+            bit = "0";
+        } else {
+            bit = "1";
+        }
+        if (binary.length() < num) {
+            int y = binary.length();
+            for (int i = 0; i < num - y; i++) {
+                binary = bit + binary;
+            }
+        } else {
+            int y = binary.length();
+            for (int i = 0; i < y - num; i++) {
+                binary = binary.substring(1);
+            }
+        }
+        return binary;
+    }
+
+    public static String getBinaryTwosCompliment(int num) {
+        if (num >= 0) {
+            return "0" + Integer.toBinaryString(num);
+        }
+        return Integer.toBinaryString(num);
+    }
+
+    public static int parseSignedBinary(String binaryString) {
+        if (binaryString.charAt(0) == '1') {
+            // This is a negative number
+            String invertedBinaryString = binaryString.substring(1).replace('0', '2').replace('1', '0').replace('2', '1');  // Invert all bits
+            int positiveNumber = Integer.parseInt(invertedBinaryString, 2) + 1;  // Convert to positive and add one (because of the two's complement)
+            int number = -positiveNumber;  // Negate
+            return number;
+        } else {
+            // This is a positive number
+            int number = Integer.parseInt(binaryString, 2);
+            return number;
         }
     }
-
-    private static String getBits(int number, int numBits) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = numBits - 1; i >= 0; i--) {
-            int bit = (number >> i) & 1;
-            sb.append(bit);
-        }
-        return sb.toString();
-    }
-
 
 }
