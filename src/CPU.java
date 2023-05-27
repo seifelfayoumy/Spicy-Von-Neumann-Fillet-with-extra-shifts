@@ -10,15 +10,41 @@ public class CPU {
     String[] memory;
     int[] registers;
 
-    public CPU() {
+    boolean flushPreviousInstructions;
+
+    public CPU(String programAddress) {
         this.memory = new String[2048];
-        int programSize = this.parseFile();
+        int programSize = this.parseFile(programAddress);
         int clockCycles = 7 + ((programSize - 1) * 2);
         this.registers = new int[33];
         Arrays.fill(registers, 0);
+        this.flushPreviousInstructions = false;
         Queue<Instruction> pipeline = new LinkedList<>();
 
         for (int i = 1; i <= clockCycles; i++) {
+
+            if (this.flushPreviousInstructions) {
+                Iterator<Instruction> iteratorOld = pipeline.iterator();
+                while (iteratorOld.hasNext()) {
+                    Instruction instruction = iteratorOld.next();
+                    switch (instruction.pipelineStage) {
+                        case 1:
+                            iteratorOld.remove();
+                            break;
+                        case 2:
+                            iteratorOld.remove();
+                            break;
+                        case 3:
+                            iteratorOld.remove();
+                            break;
+                        case 4:
+                            iteratorOld.remove();
+                            break;
+                    }
+                }
+                this.flushPreviousInstructions = false;
+            }
+
             System.out.println("Clock: " + i);
 
             if (i % 2 != 0) {
@@ -28,13 +54,14 @@ public class CPU {
                 }
             }
 
+
             Iterator<Instruction> iterator = pipeline.iterator();
             while (iterator.hasNext()) {
                 Instruction instruction = iterator.next();
                 System.out.print("Instruction " + instruction.id + ", Pipeline Stage: ");
                 switch (instruction.pipelineStage) {
                     case 1:
-                        System.out.println("fetching (input: PC " + (this.registers[32]-1) + ", output: " + instruction.binary + ")");
+                        System.out.println("fetching (input: PC " + (this.registers[32] - 1) + ", output: " + instruction.binary + ")");
                         break;
                     case 2:
                         instruction = decode(instruction);
@@ -131,6 +158,7 @@ public class CPU {
             case 4: // BNE
                 if (this.registers[instruction.R1] != this.registers[instruction.R2]) {
                     this.registers[32] += instruction.IMM;
+                    this.flushPreviousInstructions = true;
                 }
                 break;
             case 5: // ANDI
@@ -143,6 +171,7 @@ public class CPU {
                 break;
             case 7: // J
                 this.registers[32] = (this.registers[32] & 0xF0000000) | instruction.ADDRESS;
+                this.flushPreviousInstructions = true;
                 break;
             case 8: // SLL
                 result.data = this.registers[instruction.R2] << instruction.SHAMT;
@@ -256,8 +285,8 @@ public class CPU {
     }
 
 
-    public int parseFile() {
-        try (BufferedReader reader = new BufferedReader(new FileReader("src/program.txt"))) {
+    public int parseFile(String address) {
+        try (BufferedReader reader = new BufferedReader(new FileReader(address))) {
             String line;
             int memoryIndex = 0;
             while ((line = reader.readLine()) != null) {
